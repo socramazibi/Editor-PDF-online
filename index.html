@@ -9,9 +9,141 @@
         canvas { border: 1px solid black; cursor: crosshair; margin-top: 10px; }
         #downloadLink { display: none; margin-top: 10px; }
         button { margin: 5px; padding: 10px; }
+        #message { margin-top: 10px; font-size: 14px; color: #333; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.16.0/pdf-lib.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+
+            let pdfDoc = null, pdfLibDoc = null;
+            let currentPage = null;
+            let textEntries = [];
+            let undoStack = [];
+            let redoStack = [];
+            const canvas = document.getElementById('pdfCanvas');
+            const ctx = canvas.getContext('2d');
+
+            document.getElementById('pdfInput').addEventListener('change', async (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const typedArray = new Uint8Array(e.target.result);
+                        pdfDoc = await pdfjsLib.getDocument({ data: typedArray }).promise;
+                        pdfLibDoc = await PDFLib.PDFDocument.load(typedArray);
+                        
+                        if (pdfDoc.numPages < 1) {
+                            alert("El PDF está vacío o no es válido.");
+                            return;
+                        }
+
+                        currentPage = await pdfDoc.getPage(1);
+                        textEntries = [];
+                        undoStack = [];
+                        redoStack = [];
+                        await renderPDF();
+                    } catch (error) {
+                        console.error("Error al cargar el PDF:", error);
+                        alert("No se pudo cargar el PDF. Verifica que sea un archivo válido.");
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            });
+
+            async function renderPDF() {
+                if (!currentPage) {
+                    console.error("No se ha cargado ninguna página del PDF.");
+                    return;
+                }
+
+                const viewport = currentPage.getViewport({ scale: 1.5 });
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                
+                const renderContext = { canvasContext: ctx, viewport: viewport };
+                
+                ctx.clearRect(0, 0, canvas.width, canvas.height); // Limpiar canvas antes de redibujar
+                
+                await currentPage.render(renderContext).promise;
+                
+                // Redibujar los textos agregados
+                ctx.fillStyle = "red";
+                ctx.font = "16px Arial";
+                textEntries.forEach(entry => {
+                    ctx.fillText(entry.text, entry.x, entry.y);
+                });
+            }
+
+            canvas.addEventListener('click', (event) => {
+                if (!currentPage) return;
+                
+                const rect = canvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+                const text = document.getElementById('textToAdd').value;
+
+                if (text) {
+                    undoStack.push([...textEntries]);
+                    redoStack = [];
+                    textEntries.push({ text, x, y });
+                    renderPDF();
+                }
+            });
+
+            document.getElementById('undoBtn').addEventListener('click', () => {
+                if (undoStack.length > 0) {
+                    redoStack.push([...textEntries]);
+                    textEntries = undoStack.pop();
+                    renderPDF();
+                }
+            });
+
+            document.getElementById('redoBtn').addEventListener('click', () => {
+                if (redoStack.length > 0) {
+                    undoStack.push([...textEntries]);
+                    textEntries = redoStack.pop();
+                    renderPDF();
+                }
+            });
+
+            document.getElementById('clearBtn').addEventListener('click', () => {
+                undoStack.push([...textEntries]);
+                redoStack = [];
+                textEntries = [];
+                renderPDF();
+            });
+
+            document.getElementById('downloadBtn').addEventListener('click', async () => {
+                if (!pdfLibDoc) {
+                    alert('Sube un PDF primero.');
+                    return;
+                }
+
+                const page = pdfLibDoc.getPages()[0];
+
+                textEntries.forEach(entry => {
+                    page.drawText(entry.text, { 
+                        x: entry.x, 
+                        y: canvas.height - entry.y,  
+                        size: 16,
+                        color: PDFLib.rgb(0, 0, 0) // Cambiar el color a negro para la descarga
+                    });
+                });
+
+                const editedPdfBytes = await pdfLibDoc.save();
+                const blob = new Blob([editedPdfBytes], { type: 'application/pdf' });
+                const link = document.getElementById('downloadLink');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'editado.pdf';
+                link.style.display = 'block';
+                link.innerText = 'Descargar PDF Editado';
+            });
+        });
+    </script>
 </head>
 <body>
     <h2>Editor Visual de PDF</h2>
@@ -25,112 +157,8 @@
     <button id="clearBtn">🗑 Borrar Todo</button>
     <button id="downloadBtn">📥 Descargar PDF</button>
     <a id="downloadLink">Descargar</a>
-
-    <script>
-        let pdfDoc = null, pdfBytes = null, pdfLibDoc = null;
-        let currentPage = null;
-        let textEntries = []; // Lista de textos agregados
-        let undoStack = []; // Para deshacer cambios
-        let redoStack = []; // Para rehacer cambios
-        const canvas = document.getElementById('pdfCanvas');
-        const ctx = canvas.getContext('2d');
-
-        document.getElementById('pdfInput').addEventListener('change', async (event) => {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                const typedArray = new Uint8Array(e.target.result);
-                pdfDoc = await pdfjsLib.getDocument({ data: typedArray }).promise;
-                currentPage = await pdfDoc.getPage(1);
-                pdfLibDoc = await PDFLib.PDFDocument.load(typedArray);
-
-                textEntries = [];
-                undoStack = [];
-                redoStack = [];
-                renderPDF();
-            };
-            reader.readAsArrayBuffer(file);
-        });
-
-        async function renderPDF() {
-            const viewport = currentPage.getViewport({ scale: 1.5 });
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            
-            const renderContext = { canvasContext: ctx, viewport: viewport };
-            await currentPage.render(renderContext).promise();
-
-            // Redibujar los textos agregados
-            ctx.fillStyle = "red";
-            ctx.font = "16px Arial";
-            textEntries.forEach(entry => {
-                ctx.fillText(entry.text, entry.x, entry.y);
-            });
-        }
-
-        canvas.addEventListener('click', (event) => {
-            const rect = canvas.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
-            const text = document.getElementById('textToAdd').value;
-
-            if (text) {
-                undoStack.push([...textEntries]); // Guardamos el estado para deshacer
-                redoStack = []; // Limpiamos el redoStack al agregar nuevo texto
-                textEntries.push({ text, x, y });
-                renderPDF();
-            }
-        });
-
-        document.getElementById('undoBtn').addEventListener('click', () => {
-            if (undoStack.length > 0) {
-                redoStack.push([...textEntries]); // Guardamos para rehacer
-                textEntries = undoStack.pop(); // Restauramos el estado anterior
-                renderPDF();
-            }
-        });
-
-        document.getElementById('redoBtn').addEventListener('click', () => {
-            if (redoStack.length > 0) {
-                undoStack.push([...textEntries]); // Guardamos el estado para deshacer
-                textEntries = redoStack.pop(); // Restauramos el estado siguiente
-                renderPDF();
-            }
-        });
-
-        document.getElementById('clearBtn').addEventListener('click', () => {
-            undoStack.push([...textEntries]); // Guardamos estado antes de borrar
-            redoStack = []; // Limpiamos el redoStack
-            textEntries = []; // Vaciamos la lista de textos
-            renderPDF();
-        });
-
-        document.getElementById('downloadBtn').addEventListener('click', async () => {
-            if (!pdfLibDoc) {
-                alert('Sube un PDF primero.');
-                return;
-            }
-
-            const page = pdfLibDoc.getPages()[0];
-
-            textEntries.forEach(entry => {
-                page.drawText(entry.text, { 
-                    x: entry.x, 
-                    y: canvas.height - entry.y,  // Corrección: Invertimos la Y
-                    size: 16 
-                });
-            });
-
-            const editedPdfBytes = await pdfLibDoc.save();
-            const blob = new Blob([editedPdfBytes], { type: 'application/pdf' });
-            const link = document.getElementById('downloadLink');
-            link.href = URL.createObjectURL(blob);
-            link.download = 'editado.pdf';
-            link.style.display = 'block';
-            link.innerText = 'Descargar PDF Editado';
-        });
-    </script>
+    <div id="message">
+        <p><strong>Nota:</strong> Como Funciona: Escribe en el recuadro lo que quieras escribir en el PDF y luego presionas con el ratón o con el dedo desde un móvil donde quieras que vaya el texto, puedes repetir el proceso todas las que veces que quieras, va bien para rellenar documentos. Aunque el texto se muestra en color rojo en el editor, cuando descargues el PDF, el texto aparecerá en color negro.</p>
+    </div>
 </body>
 </html>
