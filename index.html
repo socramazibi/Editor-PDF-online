@@ -3,22 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Editor de PDF</title>
+    <title>Editor Visual de PDF</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        canvas { border: 1px solid black; cursor: crosshair; }
+        #downloadLink { display: none; margin-top: 10px; }
+    </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.16.0/pdf-lib.min.js"></script>
 </head>
 <body>
-    <h2>Sube un PDF para editar</h2>
+    <h2>Editor Visual de PDF</h2>
     <input type="file" id="pdfInput">
+    <br><br>
     <canvas id="pdfCanvas"></canvas>
+    <br>
     <input type="text" id="textToAdd" placeholder="Escribe algo...">
-    <button id="editBtn">Agregar Texto</button>
-    <a id="downloadLink" style="display:none">Descargar PDF</a>
+    <button id="downloadBtn">Descargar PDF Editado</button>
+    <a id="downloadLink">Descargar</a>
 
     <script>
-        let pdfDoc = null;
+        let pdfDoc = null, pdfBytes = null, pdfLibDoc = null;
         let currentPage = null;
-        let pdfBytes = null;
+        let textEntries = []; // Guardará los textos y posiciones
+        const canvas = document.getElementById('pdfCanvas');
+        const ctx = canvas.getContext('2d');
 
         document.getElementById('pdfInput').addEventListener('change', async (event) => {
             const file = event.target.files[0];
@@ -29,44 +38,55 @@
                 const typedArray = new Uint8Array(e.target.result);
                 pdfDoc = await pdfjsLib.getDocument({ data: typedArray }).promise;
                 currentPage = await pdfDoc.getPage(1);
+                pdfLibDoc = await PDFLib.PDFDocument.load(typedArray);
 
-                renderPDF(currentPage);
+                renderPDF();
             };
             reader.readAsArrayBuffer(file);
         });
 
-        async function renderPDF(page) {
-            const canvas = document.getElementById('pdfCanvas');
-            const ctx = canvas.getContext('2d');
-            const viewport = page.getViewport({ scale: 1.5 });
-
+        async function renderPDF() {
+            const viewport = currentPage.getViewport({ scale: 1.5 });
             canvas.width = viewport.width;
             canvas.height = viewport.height;
-
+            
             const renderContext = { canvasContext: ctx, viewport: viewport };
-            await page.render(renderContext).promise;
+            await currentPage.render(renderContext).promise;
+
+            // Redibujar los textos agregados
+            ctx.fillStyle = "red";
+            ctx.font = "16px Arial";
+            textEntries.forEach(entry => {
+                ctx.fillText(entry.text, entry.x, entry.y);
+            });
         }
 
-        document.getElementById('editBtn').addEventListener('click', async () => {
-            if (!pdfDoc) {
-                alert('Sube un archivo PDF primero.');
+        canvas.addEventListener('click', (event) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            const text = document.getElementById('textToAdd').value;
+
+            if (text) {
+                textEntries.push({ text, x, y });
+                renderPDF();
+            }
+        });
+
+        document.getElementById('downloadBtn').addEventListener('click', async () => {
+            if (!pdfLibDoc) {
+                alert('Sube un PDF primero.');
                 return;
             }
 
-            const existingPdfBytes = new Uint8Array(await pdfDoc.getData());
-            const pdfLibDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
             const page = pdfLibDoc.getPages()[0];
 
-            const text = document.getElementById('textToAdd').value;
-            if (!text) {
-                alert('Escribe algo para agregar al PDF.');
-                return;
-            }
+            textEntries.forEach(entry => {
+                page.drawText(entry.text, { x: entry.x, y: canvas.height - entry.y, size: 16 });
+            });
 
-            page.drawText(text, { x: 50, y: 500, size: 20 });
-
-            pdfBytes = await pdfLibDoc.save();
-            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+            const editedPdfBytes = await pdfLibDoc.save();
+            const blob = new Blob([editedPdfBytes], { type: 'application/pdf' });
             const link = document.getElementById('downloadLink');
             link.href = URL.createObjectURL(blob);
             link.download = 'editado.pdf';
