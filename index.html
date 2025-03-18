@@ -6,8 +6,9 @@
     <title>Editor Visual de PDF</title>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; }
-        canvas { border: 1px solid black; cursor: crosshair; }
+        canvas { border: 1px solid black; cursor: crosshair; margin-top: 10px; }
         #downloadLink { display: none; margin-top: 10px; }
+        button { margin: 5px; padding: 10px; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.16.0/pdf-lib.min.js"></script>
@@ -19,13 +20,18 @@
     <canvas id="pdfCanvas"></canvas>
     <br>
     <input type="text" id="textToAdd" placeholder="Escribe algo...">
-    <button id="downloadBtn">Descargar PDF Editado</button>
+    <button id="undoBtn">⏪ Deshacer</button>
+    <button id="redoBtn">⏩ Rehacer</button>
+    <button id="clearBtn">🗑 Borrar Todo</button>
+    <button id="downloadBtn">📥 Descargar PDF</button>
     <a id="downloadLink">Descargar</a>
 
     <script>
         let pdfDoc = null, pdfBytes = null, pdfLibDoc = null;
         let currentPage = null;
-        let textEntries = []; // Guardará los textos y posiciones
+        let textEntries = []; // Lista de textos agregados
+        let undoStack = []; // Para deshacer cambios
+        let redoStack = []; // Para rehacer cambios
         const canvas = document.getElementById('pdfCanvas');
         const ctx = canvas.getContext('2d');
 
@@ -40,6 +46,9 @@
                 currentPage = await pdfDoc.getPage(1);
                 pdfLibDoc = await PDFLib.PDFDocument.load(typedArray);
 
+                textEntries = [];
+                undoStack = [];
+                redoStack = [];
                 renderPDF();
             };
             reader.readAsArrayBuffer(file);
@@ -51,7 +60,7 @@
             canvas.height = viewport.height;
             
             const renderContext = { canvasContext: ctx, viewport: viewport };
-            await currentPage.render(renderContext).promise;
+            await currentPage.render(renderContext).promise();
 
             // Redibujar los textos agregados
             ctx.fillStyle = "red";
@@ -68,9 +77,34 @@
             const text = document.getElementById('textToAdd').value;
 
             if (text) {
+                undoStack.push([...textEntries]); // Guardamos el estado para deshacer
+                redoStack = []; // Limpiamos el redoStack al agregar nuevo texto
                 textEntries.push({ text, x, y });
                 renderPDF();
             }
+        });
+
+        document.getElementById('undoBtn').addEventListener('click', () => {
+            if (undoStack.length > 0) {
+                redoStack.push([...textEntries]); // Guardamos para rehacer
+                textEntries = undoStack.pop(); // Restauramos el estado anterior
+                renderPDF();
+            }
+        });
+
+        document.getElementById('redoBtn').addEventListener('click', () => {
+            if (redoStack.length > 0) {
+                undoStack.push([...textEntries]); // Guardamos el estado para deshacer
+                textEntries = redoStack.pop(); // Restauramos el estado siguiente
+                renderPDF();
+            }
+        });
+
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            undoStack.push([...textEntries]); // Guardamos estado antes de borrar
+            redoStack = []; // Limpiamos el redoStack
+            textEntries = []; // Vaciamos la lista de textos
+            renderPDF();
         });
 
         document.getElementById('downloadBtn').addEventListener('click', async () => {
