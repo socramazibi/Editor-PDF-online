@@ -4,44 +4,74 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Editor de PDF</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.16.0/pdf-lib.min.js"></script>
 </head>
 <body>
     <h2>Sube un PDF para editar</h2>
     <input type="file" id="pdfInput">
+    <canvas id="pdfCanvas"></canvas>
+    <input type="text" id="textToAdd" placeholder="Escribe algo...">
     <button id="editBtn">Agregar Texto</button>
     <a id="downloadLink" style="display:none">Descargar PDF</a>
-    
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.16.0/pdf-lib.min.js"></script>
+
     <script>
+        let pdfDoc = null;
+        let currentPage = null;
+        let pdfBytes = null;
+
+        document.getElementById('pdfInput').addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const typedArray = new Uint8Array(e.target.result);
+                pdfDoc = await pdfjsLib.getDocument({ data: typedArray }).promise;
+                currentPage = await pdfDoc.getPage(1);
+
+                renderPDF(currentPage);
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        async function renderPDF(page) {
+            const canvas = document.getElementById('pdfCanvas');
+            const ctx = canvas.getContext('2d');
+            const viewport = page.getViewport({ scale: 1.5 });
+
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            const renderContext = { canvasContext: ctx, viewport: viewport };
+            await page.render(renderContext).promise;
+        }
+
         document.getElementById('editBtn').addEventListener('click', async () => {
-            const fileInput = document.getElementById('pdfInput');
-            if (fileInput.files.length === 0) {
-                alert('Sube un archivo PDF');
+            if (!pdfDoc) {
+                alert('Sube un archivo PDF primero.');
                 return;
             }
 
-            const reader = new FileReader();
-            reader.onload = async (event) => {
-                const existingPdfBytes = event.target.result;
-                const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
-                const page = pdfDoc.getPages()[0];
-                const { width, height } = page.getSize();
+            const existingPdfBytes = new Uint8Array(await pdfDoc.getData());
+            const pdfLibDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
+            const page = pdfLibDoc.getPages()[0];
 
-                page.drawText("Texto de prueba", {
-                    x: 50,
-                    y: height - 100,
-                    size: 20
-                });
+            const text = document.getElementById('textToAdd').value;
+            if (!text) {
+                alert('Escribe algo para agregar al PDF.');
+                return;
+            }
 
-                const pdfBytes = await pdfDoc.save();
-                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-                const link = document.getElementById('downloadLink');
-                link.href = URL.createObjectURL(blob);
-                link.download = 'editado.pdf';
-                link.style.display = 'block';
-                link.innerText = 'Descargar PDF Editado';
-            };
-            reader.readAsArrayBuffer(fileInput.files[0]);
+            page.drawText(text, { x: 50, y: 500, size: 20 });
+
+            pdfBytes = await pdfLibDoc.save();
+            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+            const link = document.getElementById('downloadLink');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'editado.pdf';
+            link.style.display = 'block';
+            link.innerText = 'Descargar PDF Editado';
         });
     </script>
 </body>
