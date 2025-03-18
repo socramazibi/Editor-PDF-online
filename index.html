@@ -116,7 +116,11 @@
             const page = pdfLibDoc.getPages()[0];
 
             textEntries.forEach(entry => {
-                page.drawText(entry.text, { x: entry.x, y: canvas.height - entry.y, size: 16 });
+                page.drawText(entry.text, { 
+                    x: entry.x, 
+                    y: canvas.height - entry.y,  // Corrección: Invertimos la Y
+                    size: 16 
+                });
             });
 
             const editedPdfBytes = await pdfLibDoc.save();
